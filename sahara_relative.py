@@ -3,7 +3,6 @@ from cartopy.util import add_cyclic_point
 from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
-from matplotlib.patches import Patch
 import numpy
 import xarray
 import cmocean
@@ -53,17 +52,10 @@ def shiftedColorMap(cmap, start=0, midpoint=0.5, stop=1.0, name='shiftedcmap'):
     for ri, si in zip(reg_index, shift_index):
         r, g, b, a = cmap(ri)
 
-        if (ri > 0.49) and (ri < 0.51):
-            a = 0.2
-            cdict['red'].append((si, r, r))
-            cdict['green'].append((si, g, g))
-            cdict['blue'].append((si, b, b))
-            cdict['alpha'].append((si, a, a))
-        else:
-            cdict['red'].append((si, r, r))
-            cdict['green'].append((si, g, g))
-            cdict['blue'].append((si, b, b))
-            cdict['alpha'].append((si, a, a))
+        cdict['red'].append((si, r, r))
+        cdict['green'].append((si, g, g))
+        cdict['blue'].append((si, b, b))
+        cdict['alpha'].append((si, a, a))
 
     newcmap = LinearSegmentedColormap(name, cdict)
     plt.register_cmap(cmap=newcmap)
@@ -72,45 +64,34 @@ def shiftedColorMap(cmap, start=0, midpoint=0.5, stop=1.0, name='shiftedcmap'):
 
 
 cmap = cmocean.cm.balance_r
-cmap = shiftedColorMap(cmap, start=2/8, midpoint=4/8, stop=1, name='shrunk')
+cmap = shiftedColorMap(cmap, start=4/12, midpoint=6/12, stop=1, name='shrunk')
 
 ds = xarray.open_dataset('ExpWindSolar0_prec_diff.nc')
+ds_ctl = xarray.open_dataset('attm_ctl.nc')
+ctl_prec = (ds_ctl['precls'] + ds_ctl['precnv'])[50*12:].mean('time')
+ds.difference_of_prec.values[numpy.isnan(ds.difference_of_prec.values)] = 0
+dat_relative = 100*ds.difference_of_prec.values/ctl_prec.values
 
 ax = plt.subplot(1, 1, 1, projection=ccrs.PlateCarree())
 ax.coastlines()
 
 # Avoid discontinuity at the prime meridian
-dat, lon_cyc = add_cyclic_point(ds.difference_of_prec.values, coord=ds.lon)
-
-# Locations of NaNs in enlarged image
-nan_mask = numpy.isnan(numpy.repeat(numpy.repeat(dat, 2, axis=0), 2, axis=1))
-
-# Need to do this before zooming or it doesn't work
-dat[numpy.isnan(dat)] = 0
+dat, lon_cyc = add_cyclic_point(dat_relative, coord=ds.lon)
 
 # Smooth contours by zooming
 lat_zoom = numpy.linspace(ds.lat.min(), ds.lat.max(), len(ds.lat)*2)
 lon_zoom = numpy.linspace(lon_cyc.min(), lon_cyc.max(), len(lon_cyc)*2)
-dat_zoom = scipy.ndimage.zoom(dat, 2, order=2, prefilter=True)
-
-# Make the non-significant values 0, and add near-zero levels to "sandwich"
-# them and have them show up as white
-dat_zoom[nan_mask] = 0
-levels = sorted(numpy.hstack([numpy.linspace(-4, 4, 17)[4:], -0.2e-2, 0.2e-2]))
+dat_zoom = scipy.ndimage.zoom(dat, 2)
 
 plt.contourf(lon_zoom, lat_zoom, dat_zoom, transform=ccrs.PlateCarree(),
-             cmap=cmap, levels=levels, antialiased=True)
+             cmap=cmap, levels=numpy.linspace(-200, 600, 33), antialiased=True)
 
-cbar = plt.colorbar(ticks=numpy.arange(-2, 5), orientation='horizontal',
+cbar = plt.colorbar(ticks=range(-200, 700, 100), orientation='horizontal',
                     fraction=0.056, pad=0.12, spacing='proportional')
-cbar.set_label('Rainfall change (mm/day)')
+cbar.set_label('Rainfall change (%)')
 ax.set_extent([-25, 55, -2, 39], ccrs.PlateCarree())
 plt.title('Modeled rain impact of large-scale wind and solar\n'
           'farms in the Sahara')
-leg = ax.legend(handles=[Patch(facecolor='w', edgecolor='black',
-                               label='Not significant')],
-                bbox_to_anchor=(0.32, -0.42), loc=2)
-leg.get_frame().set_linewidth(0.0)
 gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
                   linewidth=2, color='gray', alpha=0, linestyle='--')
 gl.xformatter = LONGITUDE_FORMATTER
@@ -118,4 +99,4 @@ gl.yformatter = LATITUDE_FORMATTER
 gl.xlabels_top = False
 gl.ylabels_right = False
 
-plt.savefig('precip.pdf', bbox_inches="tight")
+plt.savefig('precip_relative.pdf', bbox_inches="tight")
